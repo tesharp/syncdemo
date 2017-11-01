@@ -14,6 +14,8 @@ namespace Client
     internal class ProcessFiles
     {
         private const int BlockSize = 100000;
+        private const int NumberOfRetries = 3;
+        private const int DelayOnRetries = 1000;
         private readonly BlockingCollection<FileInfo> _collection;
         private readonly BlockingCollection<ProtocolMessage> _messageCollection;
         private readonly CancellationToken _cancellationToken;
@@ -73,26 +75,38 @@ namespace Client
 
         private async Task ChangedFile(FileInfo file)
         {
-            using (var stream = File.OpenRead(file.FullPath))
+            for (int jj = 0; jj < NumberOfRetries; ++jj)
             {
-                var size = stream.Length;
-                var message = new ChangeMessage(file.Name, size);
-
-                _messageCollection.Add(message, _cancellationToken);
-                var crypto = new SHA256CryptoServiceProvider();
-
-                for (int ii = 0; ii < (size / BlockSize) + 1; ii++)
+                try
                 {
-                    var buffer = new byte[BlockSize];
-                    var read = await stream.ReadAsync(buffer, 0, BlockSize, _cancellationToken);
-                    var base64 = Convert.ToBase64String(buffer);
-                    var hash = Convert.ToBase64String(crypto.ComputeHash(buffer));
+                    using (var stream = File.OpenRead(file.FullPath))
+                    {
+                        var size = stream.Length;
+                        var message = new ChangeMessage(file.Name, size);
 
-                    var partMessage = new PartMessage(file.Name, ii * BlockSize, read, hash);
-                    var hashMessage = new HashMessage(file.Name, ii * BlockSize, read, hash, base64);
+                        _messageCollection.Add(message, _cancellationToken);
+                        var crypto = new SHA256CryptoServiceProvider();
 
-                    _messageCollection.Add(partMessage, _cancellationToken);
-                    _messageCollection.Add(hashMessage, _cancellationToken);
+                        for (int ii = 0; ii < (size / BlockSize) + 1; ii++)
+                        {
+                            var buffer = new byte[BlockSize];
+                            var read = await stream.ReadAsync(buffer, 0, BlockSize, _cancellationToken);
+                            var base64 = Convert.ToBase64String(buffer);
+                            var hash = Convert.ToBase64String(crypto.ComputeHash(buffer));
+
+                            var partMessage = new PartMessage(file.Name, ii * BlockSize, read, hash);
+                            var hashMessage = new HashMessage(file.Name, ii * BlockSize, read, hash, base64);
+
+                            _messageCollection.Add(partMessage, _cancellationToken);
+                            _messageCollection.Add(hashMessage, _cancellationToken);
+                        }
+                    }
+
+                    break;
+                } catch (IOException ex) when (jj <= NumberOfRetries)
+                {
+                    Console.WriteLine($"Retrying in {DelayOnRetries / 1000}s. IO Error = {ex.Message}");
+                    await Task.Delay(DelayOnRetries);
                 }
             }
         }

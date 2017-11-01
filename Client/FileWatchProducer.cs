@@ -61,13 +61,11 @@ namespace Client
 
         private void OnChanged(object source, FileSystemEventArgs args)
         {
-            Console.WriteLine($"{args.ChangeType} :: {args.Name}");
             _collection.Add(new FileInfo(args.Name, args.FullPath, args.ChangeType), _cancellationToken);
         }
 
         private void OnRenamed(object source, RenamedEventArgs args)
         {
-            Console.WriteLine($"{args.ChangeType} :: {args.Name}");
             _collection.Add(new FileInfo(args.OldName, args.Name, args.FullPath, args.ChangeType), _cancellationToken);
         }
     }
